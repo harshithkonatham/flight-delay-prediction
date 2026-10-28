@@ -211,5 +211,5 @@ def load_model(model_dir: Path) -> LoadedModel:
     actual = _sha256(model_path)
     if actual != metadata.get("sha256"):
         raise ValueError(f"Model file hash {actual[:12]} does not match its metadata")
-    pipeline = joblib.load(model_path)  # hash verified above
+    pipeline = joblib.load(model_path)  # nosemgrep: hash verified above
     return LoadedModel(pipeline=pipeline, metadata=metadata)

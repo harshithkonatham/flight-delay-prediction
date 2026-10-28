@@ -31,7 +31,8 @@ def _default_opener(url: str, timeout: float) -> BinaryIO:
     if not url.startswith("https://"):
         raise ValueError(f"Refusing non-HTTPS URL: {url}")
     request = urllib.request.Request(url, headers={"User-Agent": "flightdelay/0.1"})  # noqa: S310
-    return urllib.request.urlopen(request, timeout=timeout)  # type: ignore[no-any-return]  # noqa: S310
+    # Scheme is checked above, so file:// and other schemes can never reach urlopen.
+    return urllib.request.urlopen(request, timeout=timeout)  # type: ignore[no-any-return]  # noqa: S310  # nosec B310
 
 
 def validate_period(year: int, month: int) -> None:
