@@ -1,0 +1,214 @@
+# CI for the flight-delay pipeline and prediction API.
+#
+#   test ────┐
+#   sast ────┤
+#   secrets ─┼─► image (build, CVE scan, SBOM, hardened container smoke test)
+#   deps ────┤
+#   docker ──┘
+#
+# Third-party actions are pinned to full commit SHAs and each job gets only
+# the permissions it needs.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1" # weekly re-scan for newly published CVEs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.13.6"
+  PYTHON_VERSION: "3.12"
+  SEMGREP_VERSION: "1.180.0"
+  CHECKOV_VERSION: "3.3.29"
+  IMAGE: flightdelay-api:ci
+
+jobs:
+  test:
+    name: Lint, type-check and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Mypy (strict)
+        run: uv run mypy src
+      - name: Unit, integration and end-to-end tests (coverage gate 85%)
+        run: uv run pytest --cov --cov-report=xml --cov-report=term --junitxml=junit.xml
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-results
+          path: |
+            junit.xml
+            coverage.xml
+          retention-days: 14
+
+  sast:
+    name: SAST (Bandit, Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to the Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Bandit (medium severity and above fails the build)
+        run: uv run --locked bandit -r src -ll
+      - name: Semgrep (Python, OWASP Top 10, secrets)
+        run: >-
+          uvx semgrep@${{ env.SEMGREP_VERSION }} scan
+          --config p/python --config p/owasp-top-ten --config p/secrets
+          --metrics off --error --sarif-output=semgrep.sarif src
+      - name: Upload Semgrep results
+        if: ${{ !cancelled() && hashFiles('semgrep.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  secrets:
+    name: Secret scan (Gitleaks, full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependencies:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Audit runtime dependencies for known vulnerabilities
+        run: |
+          uv export --locked --no-dev --all-extras --no-emit-project --no-header --quiet -o /tmp/requirements.txt
+          uv run --locked pip-audit --disable-pip --strict -r /tmp/requirements.txt
+
+  dockerfile:
+    name: Dockerfile scan (Hadolint, Checkov)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Checkov
+        run: uvx checkov@${{ env.CHECKOV_VERSION }} --compact --framework dockerfile -f Dockerfile
+
+  image:
+    name: Build, scan and smoke-test container
+    needs: [test, sast, secrets, dependencies, dockerfile]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+          provenance: false
+      - name: Scan image for CVEs (Grype; fail on fixable high/critical)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        with:
+          image: ${{ env.IMAGE }}
+          severity-cutoff: high
+          only-fixed: true
+          output-format: sarif
+          output-file: grype.sarif
+      - name: Upload image scan results
+        if: ${{ !cancelled() && hashFiles('grype.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: grype.sarif
+          category: grype-image
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}
+          format: cyclonedx-json
+          artifact-name: flightdelay-api-sbom.cdx.json
+          upload-release-assets: false
+      - uses: astral-sh/setup-uv@18d369b23da25a81e9458561248e1aafff6a70fa # v10.3.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Train a demo model on synthetic data
+        run: |
+          uv run --locked python -m tests.demo_model /tmp/models
+          chmod -R a+rX /tmp/models
+      - name: Run hardened container and smoke test
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
+            -v /tmp/models:/models:ro "$IMAGE"
+          timeout 60 sh -c 'until curl -sf localhost:8000/ready; do sleep 1; done'
+          curl -sf -X POST localhost:8000/predict -H 'content-type: application/json' -d '{
+            "flight_date": "2024-03-15", "airline": "DL", "origin": "ATL", "dest": "LAX",
+            "scheduled_departure": 1730, "scheduled_arrival": 1915,
+            "scheduled_minutes": 285, "distance_miles": 1946}' | tee /tmp/prediction.json
+          grep -q delay_probability /tmp/prediction.json
+          # Invalid input must be rejected, not passed to the model.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/predict \
+            -H 'content-type: application/json' -d '{"airline": "DL; DROP TABLE"}')
+          test "$code" = 422
+      - name: Container logs
+        if: ${{ !cancelled() }}
+        run: docker logs api || true
