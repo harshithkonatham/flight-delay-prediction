@@ -80,8 +80,12 @@ def run_checks(parquet_glob: str, *, max_missing_arrival_ratio: float = 0.05) ->
         if rows == 0:
             return report
 
-        for col in KEY_COLUMNS:
-            nulls = _scalar(con, f'SELECT count(*) FROM flights WHERE "{col}" IS NULL')  # noqa: S608
+        null_counts = con.execute(
+            "SELECT count(*) - count(FlightDate), count(*) - count(Reporting_Airline), "
+            "count(*) - count(Origin), count(*) - count(Dest), count(*) - count(CRSDepTime) "
+            "FROM flights"
+        ).fetchone()
+        for col, nulls in zip(KEY_COLUMNS, null_counts or (), strict=True):
             add(CheckResult(f"no_nulls:{col}", nulls == 0, Severity.ERROR, f"{nulls} nulls"))
 
         bad_time = _scalar(
