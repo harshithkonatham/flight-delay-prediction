@@ -1,0 +1,48 @@
+{
+  "model_name": "logistic_regression",
+  "features": [
+    "airline",
+    "origin",
+    "dest",
+    "month",
+    "day_of_month",
+    "day_of_week",
+    "dep_hour",
+    "arr_hour",
+    "scheduled_minutes",
+    "distance",
+    "origin_hourly_departures"
+  ],
+  "split": {
+    "cutoff_date": "2024-04-06",
+    "train_rows": 1000000,
+    "test_rows": 480600,
+    "test_delay_rate": 0.1833603828547649
+  },
+  "metrics": {
+    "baseline_prior": {
+      "roc_auc": 0.5,
+      "pr_auc": 0.1833603828547649,
+      "brier": 0.15019575699164714,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    "logistic_regression": {
+      "roc_auc": 0.6487968019706486,
+      "pr_auc": 0.2865426232148254,
+      "brier": 0.21285931872524647,
+      "precision": 0.2771857371773994,
+      "recall": 0.4828818810072285,
+      "f1": 0.3522001647071482
+    },
+    "hist_gradient_boosting": {
+      "roc_auc": 0.6259473403300252,
+      "pr_auc": 0.2674862210613702,
+      "brier": 0.2540892467419463,
+      "precision": 0.2392296278507286,
+      "recall": 0.6330356433621188,
+      "f1": 0.34723583839855093
+    }
+  }
+}
