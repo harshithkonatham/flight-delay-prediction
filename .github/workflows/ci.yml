@@ -11,10 +11,9 @@
 
 name: ci
 
+# Runs on every branch push; PRs from this repo show those same checks.
 on:
   push:
-    branches: [main]
-  pull_request:
   schedule:
     - cron: "23 6 * * 1" # weekly re-scan for newly published CVEs
   workflow_dispatch:
