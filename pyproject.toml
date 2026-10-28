@@ -40,13 +40,14 @@ packages = ["src/flightdelay"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["notebooks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S", "SIM", "PL"]
 ignore = ["PLR2004", "PLR0913"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004"]
+"tests/**" = ["S101", "S311", "S608", "PLR2004"]
 
 [tool.mypy]
 python_version = "3.12"
