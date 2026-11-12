@@ -1,6 +1,6 @@
 # Airline Flight Delay Prediction
 
-[![ci](https://github.com/harshithkonatham/prediction-for-airline-flight-delays/actions/workflows/ci.yml/badge.svg)](https://github.com/harshithkonatham/prediction-for-airline-flight-delays/actions/workflows/ci.yml)
+[![ci](https://github.com/harshithkonatham/flight-delay-prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/harshithkonatham/flight-delay-prediction/actions/workflows/ci.yml)
 
 Predicts whether a US domestic flight will arrive **15+ minutes late**, using only
 information known **before departure**. This started as my MSc Data Science
