@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build: install dependencies into a virtualenv ----
-FROM python:3.12-slim AS build
+FROM python:3.15-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
@@ -11,7 +11,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev --extra api
 
 # ---- runtime: only the virtualenv and code, run as a non-root user ----
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 # Apply Debian security fixes the base image hasn't picked up yet, and remove pip: the API runs
 # from its own virtualenv, so pip in the runtime image is unused attack surface.
 RUN apt-get update \
